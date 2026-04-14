@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Environment Variables (Secrets!)
+.env
+
+# Data & Logs
+*.csv
+*.log
+found_branches*.csv
+
+# OS metadata
+.DS_Store
+Thumbs.db
