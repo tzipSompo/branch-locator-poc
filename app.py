@@ -3,6 +3,7 @@ import asyncio
 import pandas as pd
 import os
 import re
+import json
 from google.oauth2 import service_account
 from scripts.searcher import CompanySearcher
 from scripts.extractor import BranchExtractor
@@ -21,37 +22,23 @@ cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, י�
 threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
 
+
 def get_gcp_credentials():
-    if "GCP_SERVICE_ACCOUNT" not in st.secrets:
-        st.error("❌ לא נמצאו Secrets!")
+    if "GCP_JSON_CREDENTIALS" not in st.secrets:
+        st.error("❌ לא נמצא GCP_JSON_CREDENTIALS ב-Secrets!")
         st.stop()
     
     try:
-        # 1. העתקה למילון
-        creds_dict = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
+        # קריאת המחרוזת והפיכתה למילון פייתון
+        creds_info = json.loads(st.secrets["GCP_JSON_CREDENTIALS"])
         
-        if "private_key" in creds_dict:
-            pk = str(creds_dict["private_key"])
+        # ניקוי המפתח הפרטי מסימני \n כפולים
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
             
-            # 2. ניקוי אגרסיבי נגד Byte 61
-            header = "-----BEGIN PRIVATE KEY-----"
-            footer = "-----END PRIVATE KEY-----"
-            
-            if header in pk and footer in pk:
-                # חילוץ התוכן שביניהם
-                content = pk.split(header)[1].split(footer)[0]
-                # מחיקת כל תו שהוא לא אות, מספר, +, / או =
-                # זה מעיף לוכסנים, n-ים טקסטואליים ורווחים נסתרים
-                clean_content = re.sub(r'[^A-Za-z0-9+/=]', '', content)
-                # בנייה מחדש בפורמט שהספרייה חייבת לקבל
-                pk = f"{header}\n{clean_content}\n{footer}"
-            
-            creds_dict["private_key"] = pk
-
-        return service_account.Credentials.from_service_account_info(creds_dict)
-            
+        return service_account.Credentials.from_service_account_info(creds_info)
     except Exception as e:
-        st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
+        st.error(f"⚠️ שגיאה בטעינת JSON ההרשאות: {e}")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
