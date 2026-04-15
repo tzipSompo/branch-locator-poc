@@ -3,105 +3,110 @@ import asyncio
 import pandas as pd
 import os
 import re
-import json
-
-# ייבוא כללי
-import google.auth
+from google.oauth2 import service_account
 from scripts.searcher import CompanySearcher
 from scripts.extractor import BranchExtractor
 from scripts.deduplicator import BranchDeduplicator
 
-# הגדרת דף
+# הגדרת דף ועיצוב
 st.set_page_config(page_title="AI Branch Locator", page_icon="📍", layout="wide")
+
 st.title("📍 AI Branch Locator & Deduplicator")
+st.markdown("מערכת חכמה לאיתור סניפים, חילוץ נתונים וניקוי כפילויות.")
+
+# --- תפריט צד (Sidebar) ---
+st.sidebar.header("⚙️ הגדרות")
+companies_input = st.sidebar.text_input("חברות לחיפוש (מופרדות בפסיק)", "ארומה, סופר-פארם")
+cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, ירושלים, חיפה")
+threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
 def get_gcp_credentials():
+    """טעינת הרשאות מתוך ה-Secrets של Streamlit"""
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
-        st.error("❌ לא נמצאו GCP_SERVICE_ACCOUNT ב-Secrets!")
+        st.error("❌ לא נמצאו Secrets!")
         st.stop()
     
     try:
-        # 1. המרה למילון נקי
+        # המרה למילון נקי
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
-        # 2. "מכונת כביסה" למפתח הפרטי - פותר את שגיאת ה-Padding
+        # ניקוי המפתח הפרטי (ליתר ביטחון)
         if "private_key" in creds_info:
             pk = creds_info["private_key"]
-            
-            # הסרת גרשיים מיותרים אם בטעות הוכנסו (קורה הרבה ב-Secrets)
-            pk = pk.strip().strip('"').strip("'")
-            
-            # תיקון ירידות שורה - מטפל גם ב-\\n וגם ב-\n
-            pk = pk.replace("\\n", "\n")
-            
-            # אם בטעות ה-Header או ה-Footer נדבקו לשורה הראשונה
-            if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk:
-                pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
-                pk = pk.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
-            
-            creds_info["private_key"] = pk
-
-        # 3. ייבוא ושימוש במחלקה הנכונה
-        from google.oauth2 import service_account
+            if isinstance(pk, str):
+                creds_info["private_key"] = pk.replace("\\n", "\n")
+        
         return service_account.Credentials.from_service_account_info(creds_info)
-            
     except Exception as e:
-        st.error(f"⚠️ שגיאה טכנית בפורמט המפתח: {e}")
-        st.info("טיפ: וודאי שהמפתח ב-Secrets מתחיל ב-----BEGIN PRIVATE KEY----- ונגמר ב-END... בלי רווחים לפני או אחרי.")
+        st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
+    """לוגיקת ההרצה - ללא קריאות ישירות ל-st.container/st.info"""
     credentials = get_gcp_credentials()
     
+    # אתחול הרכיבים
     searcher = CompanySearcher()
     extractor = BranchExtractor()
-    # כאן אנחנו מעבירים את ה-threshold מה-sidebar
-    deduplicator = BranchDeduplicator(extractor=extractor, threshold=st.session_state.get('threshold', 82))
+    deduplicator = BranchDeduplicator(extractor=extractor, threshold=threshold)
     
     all_extracted = []
     
     for i, company in enumerate(companies):
+        # עדכון UI דרך ה-Placeholder שהוכן מראש
         status_placeholder.info(f"🔍 מחפש סניפים עבור: **{company}**...")
-        # הרצה ב-Thread נפרד כדי לא לחסום את ה-UI
+        
+        # שלב 1: חיפוש (Thread-safe)
         search_results = await asyncio.to_thread(searcher.search_company_branches, company, cities)
         
+        # שלב 2: חילוץ נתונים
         status_placeholder.info(f"🧠 מחלץ נתונים עבור: **{company}**...")
         branches = await extractor.extract_branches(company, search_results)
         all_extracted.extend(branches)
         
         progress_bar.progress((i + 1) / len(companies))
     
+    # שלב 3: ניקוי כפילויות
     status_placeholder.info(f"🧹 מנקה כפילויות עבור {len(all_extracted)} סניפים...")
     clean_branches = await deduplicator.deduplicate(all_extracted)
-    status_placeholder.success(f"✅ נמצאו {len(clean_branches)} סניפים ייחודיים!")
     
     return clean_branches
 
-# --- ממשק המשתמש ---
-companies_input = st.sidebar.text_input("חברות לחיפוש", "ארומה, סופר-פארם")
-cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, ירושלים")
-st.session_state['threshold'] = st.sidebar.slider("רגישות ניקוי", 70, 95, 82)
-
-if st.button("🚀 התחל תהליך"):
-    if companies_input and cities_input:
+# --- ממשק המשתמש להפעלה ---
+if st.button("🚀 התחל תהליך איתור ומיפוי"):
+    if not companies_input or not cities_input:
+        st.warning("נא להזין חברות וערים לחיפוש.")
+    else:
         companies = [c.strip() for c in companies_input.split(",")]
         cities = [city.strip() for city in cities_input.split(",")]
         
+        # יצירת אלמנטים של UI ב-Thread הראשי
         status_placeholder = st.empty()
         progress_bar = st.progress(0)
         
         try:
-            # יצירת Loop חדש כדי למנוע התנגשות עם Streamlit
+            # הרצה בסביבה אסינכרונית מבוקרת
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            results = loop.run_until_complete(run_branch_pipeline(companies, cities, status_placeholder, progress_bar))
+            results = loop.run_until_complete(
+                run_branch_pipeline(companies, cities, status_placeholder, progress_bar)
+            )
             
             if results:
+                status_placeholder.success(f"✅ נמצאו {len(results)} סניפים ייחודיים!")
+                
+                # הצגת התוצאות
                 df = pd.DataFrame([b.model_dump() for b in results])
                 st.subheader("📊 דוח סניפים סופי")
                 st.dataframe(df, use_container_width=True)
                 
+                # כפתור הורדה
                 csv = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                st.download_button(label="📥 הורד CSV", data=csv, file_name="branches.csv", mime="text/csv")
+                st.download_button(
+                    label="📥 הורד תוצאות כ-CSV",
+                    data=csv,
+                    file_name="branches_report.csv",
+                    mime="text/csv",
+                )
         except Exception as e:
-            st.error(f"❌ שגיאה בהרצה: {e}")
+            st.error(f"❌ שגיאה בהרצת התהליך: {e}")
