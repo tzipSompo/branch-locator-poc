@@ -5,8 +5,8 @@ langchain
 langchain-core
 langchain-google-genai
 google-auth
-google-oauth2
 google-api-python-client
 google-generativeai
 google-cloud-aiplatform
 python-dotenv
+rich<15.0.0
