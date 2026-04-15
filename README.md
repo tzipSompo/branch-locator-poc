@@ -16,7 +16,7 @@ scripts/searcher.py: מנוע חיפוש ואיתור URLs (שלב 1).
 
 scripts/extractor.py: חילוץ נתונים מובנים מהטקסט (שלב 2).
 
-scripts/processor.py: ניקוי איחוד כפילויות (שלב 3).
+scripts/deduplicator.py: ניקוי איחוד כפילויות (שלב 3).
 
 ⚙️ התקנה והרצה
 יצירת סביבה וירטואלית:
