@@ -3,7 +3,7 @@ import asyncio
 import pandas as pd
 import os
 import re
-from google.oauth2 import service_account
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from scripts.searcher import CompanySearcher
 from scripts.extractor import BranchExtractor
 from scripts.deduplicator import BranchDeduplicator
@@ -19,24 +19,28 @@ companies_input = st.sidebar.text_input("חברות לחיפוש", "ארומה, 
 cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, ירושלים")
 threshold = st.sidebar.slider("רגישות ניקוי", 70, 95, 82)
 
+
 def get_gcp_credentials():
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
         st.error("שגיאה: לא נמצא GCP_SERVICE_ACCOUNT ב-Secrets!")
         st.stop()
     
     try:
-        # המרה בטוחה למילון
+        # המרה למילון רגיל
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
+        # ניקוי ה-Private Key - חשוב מאוד!
         if "private_key" in creds_info:
-            # תיקון Private Key - ה-replace הכפול קריטי
+            # אנחנו מוודאים שאין רווחים ושהירידות שורה תקינות
             creds_info["private_key"] = creds_info["private_key"].strip().replace("\\n", "\n")
         
-        # שימוש בגישה ישירה למחלקה כדי לעקוף בעיות ב-Python 3.14
-        from google.oauth2.service_account import Credentials
-        return Credentials.from_info(creds_info)
+        # שימוש בשם המפורש שנתנו ב-Import כדי למנוע בלבול עם מחלקות אחרות
+        return ServiceAccountCredentials.from_info(creds_info)
+        
     except Exception as e:
-        st.error(f"שגיאה בטעינת הרשאות: {e}")
+        st.error(f"❌ שגיאה פנימית בטעינת ה-Credentials: {e}")
+        # הדפסת סוג האובייקט ללוגים כדי שנדע מה הוא מצא במקום ה-Credentials הנכון
+        print(f"DEBUG: Credentials class type tried: {type(ServiceAccountCredentials)}")
         st.stop()
 
 # --- פונקציית הלוגיקה (נקייה מ-Streamlit UI) ---
