@@ -27,25 +27,24 @@ def get_gcp_credentials():
         st.stop()
     
     try:
-        # 1. טעינה למילון
+        # 1. העתקה למילון
         creds_dict = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
-        # 2. הניקוי ה"אטומי" של המפתח הפרטי
         if "private_key" in creds_dict:
             pk = str(creds_dict["private_key"])
             
-            # חילוץ רק מה שנמצא בין ה-BEGIN ל-END
+            # 2. ניקוי אגרסיבי נגד Byte 61
             header = "-----BEGIN PRIVATE KEY-----"
             footer = "-----END PRIVATE KEY-----"
             
             if header in pk and footer in pk:
-                # לוקחים את כל מה שביניהם
-                inner_key = pk.split(header)[1].split(footer)[0]
-                # מנקים כל תו שהוא לא חלק מ-Base64 (כולל \n, רווחים ולוכסנים סוררים)
-                # זה הפתרון ל-Byte 61 ו-Byte 92
-                clean_key = re.sub(r'[^A-Za-z0-9+/=]', '', inner_key)
-                # בונים מחדש עם ירידות שורה אמיתיות שהספרייה אוהבת
-                pk = f"{header}\n{clean_key}\n{footer}"
+                # חילוץ התוכן שביניהם
+                content = pk.split(header)[1].split(footer)[0]
+                # מחיקת כל תו שהוא לא אות, מספר, +, / או =
+                # זה מעיף לוכסנים, n-ים טקסטואליים ורווחים נסתרים
+                clean_content = re.sub(r'[^A-Za-z0-9+/=]', '', content)
+                # בנייה מחדש בפורמט שהספרייה חייבת לקבל
+                pk = f"{header}\n{clean_content}\n{footer}"
             
             creds_dict["private_key"] = pk
 
