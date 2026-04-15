@@ -17,26 +17,28 @@ st.title("📍 AI Branch Locator & Deduplicator")
 
 def get_gcp_credentials():
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
-        st.error("❌ לא נמצאו Secrets!")
+        st.error("❌ לא נמצאו GCP_SERVICE_ACCOUNT ב-Secrets!")
         st.stop()
     
     try:
-        # המרה למילון
+        # 1. המרה למילון נקי
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
+        
+        # 2. ניקוי ה-Private Key (קריטי)
         if "private_key" in creds_info:
             creds_info["private_key"] = creds_info["private_key"].strip().replace("\\n", "\n")
         
-        # התיקון: ייבוא ישיר מהנתיב המלא של oauth2
-        import google.oauth2.service_account
+        # 3. התיקון הקריטי: ייבוא ישיר ושימוש במתודה הסטנדרטית ביותר
+        from google.oauth2 import service_account
         
-        # שימוש בנתיב המלא כדי שלא יהיה שום ספק למערכת
-        return google.oauth2.service_account.Credentials.from_info(creds_info)
+        # אנחנו מנסים את שתי המתודות האפשריות כדי לוודא שזה יעבוד בכל גרסה
+        if hasattr(service_account.Credentials, 'from_service_account_info'):
+            return service_account.Credentials.from_service_account_info(creds_info)
+        else:
+            return service_account.Credentials.from_info(creds_info)
             
     except Exception as e:
-        st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
-        # הדפסה ללוג הפנימי כדי לראות מה מותקן
-        import sys
-        print(f"Python version: {sys.version}")
+        st.error(f"⚠️ שגיאה טכנית בטעינת ההרשאות: {e}")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
