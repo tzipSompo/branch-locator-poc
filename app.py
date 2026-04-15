@@ -26,19 +26,17 @@ def get_gcp_credentials():
         if "private_key" in creds_info:
             creds_info["private_key"] = creds_info["private_key"].strip().replace("\\n", "\n")
         
-        # --- התיקון ה"אלים" לשגיאת ה-AttributeError ---
-        # אנחנו מייבאים את המודול הספציפי ומחלצים ממנו את המחלקה ישירות מהדיקשנרי שלו
-        import google.oauth2.service_account as sa
+        # התיקון: ייבוא ישיר מהנתיב המלא של oauth2
+        import google.oauth2.service_account
         
-        if hasattr(sa.Credentials, 'from_info'):
-            return sa.Credentials.from_info(creds_info)
-        else:
-            # אם משום מה הוא עדיין לא מוצא, ננסה דרך הפונקציה המקבילה
-            from google.auth import service_account
-            return service_account.Credentials.from_info(creds_info)
+        # שימוש בנתיב המלא כדי שלא יהיה שום ספק למערכת
+        return google.oauth2.service_account.Credentials.from_info(creds_info)
             
     except Exception as e:
         st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
+        # הדפסה ללוג הפנימי כדי לראות מה מותקן
+        import sys
+        print(f"Python version: {sys.version}")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
