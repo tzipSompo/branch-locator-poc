@@ -29,29 +29,32 @@ def get_gcp_credentials():
         st.stop()
     
     try:
-        # המרת ה-Secrets למילון רגיל
         creds_dict = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
-        # טיפול במפתח הפרטי
         if "private_key" in creds_dict:
             pk = creds_dict["private_key"]
             
-            # שלב א': אם המפתח הגיע עם \n כטקסט (בגלל העתקה מה-UI), נהפוך אותו לירידת שורה אמיתית
+            # שלב א': ניקוי תווי מילוט של Streamlit (הופך \\n ל-n\ אמיתי)
             pk = pk.replace("\\n", "\n")
             
-            # שלב ב': הסרת רווחים מיותרים בתחילת/סוף המפתח כולו
-            pk = pk.strip()
+            # שלב ב': חילוץ התוכן שבין הכותרות כדי לנקות אותו מרווחים
+            header = "-----BEGIN PRIVATE KEY-----"
+            footer = "-----END PRIVATE KEY-----"
+            
+            if header in pk and footer in pk:
+                # לוקחים מה שיש בין הכותרות
+                core_key = pk.split(header)[1].split(footer)[0]
+                # מנקים כל מה שהוא לא תו Base64 (מעיפים רווחים, טאבים, וגם את ה-\= המוזר)
+                clean_core = "".join(core_key.split())
+                # בונים מחדש בצורה מושלמת
+                pk = f"{header}\n{clean_core}\n{footer}\n"
             
             creds_dict["private_key"] = pk
 
         return service_account.Credentials.from_service_account_info(creds_dict)
             
     except Exception as e:
-        # הדפסת השגיאה המלאה כדי שנוכל לראות אם יש משהו נוסף
         st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
-        # בדיקת דיבג קטנה (תוכלי למחוק אחרי שיעבוד)
-        if "pk" in locals():
-            st.write(f"DEBUG: מפתח מתחיל ב: {pk[:20]}... ומסתיים ב: ...{pk[-20:]}")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
