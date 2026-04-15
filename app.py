@@ -20,22 +20,35 @@ companies_input = st.sidebar.text_input("חברות לחיפוש (מופרדות
 cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, ירושלים, חיפה")
 threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
+
 def get_gcp_credentials():
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
         st.error("❌ לא נמצאו Secrets!")
         st.stop()
     
     try:
-        # טעינה למילון
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
         if "private_key" in creds_info:
-            pk = creds_info["private_key"]
-            # אם המפתח הגיע כטקסט עם \n כתובים, נמיר אותם לירידות שורה
-            creds_info["private_key"] = pk.replace("\\n", "\n")
-        
+            pk = str(creds_info["private_key"])
+            
+            # --- הניקוי הסופי נגד Byte 92 (Backslash) ---
+            header = "-----BEGIN PRIVATE KEY-----"
+            footer = "-----END PRIVATE KEY-----"
+            
+            if header in pk and footer in pk:
+                # חילוץ גוף המפתח
+                content = pk.split(header)[1].split(footer)[0]
+                # מחיקה של כל מה שאינו אות, מספר, +, / או =
+                # זה מעיף לוכסנים, רווחים וירידות שורה מיותרות
+                clean_content = re.sub(r'[^A-Za-z0-9+/=]', '', content)
+                pk = f"{header}\n{clean_content}\n{footer}"
+            
+            creds_info["private_key"] = pk
+
         from google.oauth2 import service_account
         return service_account.Credentials.from_service_account_info(creds_info)
+            
     except Exception as e:
         st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
         st.stop()
