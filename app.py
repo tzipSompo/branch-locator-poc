@@ -21,21 +21,20 @@ cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, י�
 threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
 def get_gcp_credentials():
-    """טעינת הרשאות מתוך ה-Secrets של Streamlit"""
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
         st.error("❌ לא נמצאו Secrets!")
         st.stop()
     
     try:
-        # המרה למילון נקי
+        # טעינה למילון
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
-        # ניקוי המפתח הפרטי (ליתר ביטחון)
         if "private_key" in creds_info:
             pk = creds_info["private_key"]
-            if isinstance(pk, str):
-                creds_info["private_key"] = pk.replace("\\n", "\n")
+            # אם המפתח הגיע כטקסט עם \n כתובים, נמיר אותם לירידות שורה
+            creds_info["private_key"] = pk.replace("\\n", "\n")
         
+        from google.oauth2 import service_account
         return service_account.Credentials.from_service_account_info(creds_info)
     except Exception as e:
         st.error(f"⚠️ שגיאה בטעינת הרשאות: {e}")
