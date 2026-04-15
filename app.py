@@ -22,6 +22,7 @@ cities_input = st.sidebar.text_area("ערים לחיפוש", "תל אביב, י�
 threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
 
+
 def get_gcp_credentials():
     if "GCP_SERVICE_ACCOUNT" not in st.secrets:
         st.error("❌ לא נמצאו Secrets!")
@@ -34,17 +35,17 @@ def get_gcp_credentials():
         if "private_key" in creds_dict:
             pk = str(creds_dict["private_key"])
             
-            # 2. ניקוי אגרסיבי - משאיר רק תווים חוקיים של מפתח
+            # 2. הניקוי ה"אטומי" - הפתרון ל-Byte 61
             header = "-----BEGIN PRIVATE KEY-----"
             footer = "-----END PRIVATE KEY-----"
             
             if header in pk and footer in pk:
-                # חילוץ התוכן שבין הכותרות
+                # חילוץ גוף המפתח שביניהם
                 content = pk.split(header)[1].split(footer)[0]
-                # מחיקת כל מה שאינו אות, מספר, +, / או =
-                # זה הפתרון הסופי ללוכסנים (Byte 92) ולשגיאות ריפוד (Byte 61)
+                # מחיקת כל תו שהוא לא אות, מספר, +, / או =
+                # זה מעיף לוכסנים, n\ טקסטואליים ורווחים נסתרים
                 clean_content = re.sub(r'[^A-Za-z0-9+/=]', '', content)
-                # בנייה מחדש בפורמט PEM תקין
+                # בנייה מחדש בפורמט PEM שהספרייה חייבת לקבל
                 pk = f"{header}\n{clean_content}\n{footer}"
             
             creds_dict["private_key"] = pk
