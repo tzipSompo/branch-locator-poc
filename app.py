@@ -24,21 +24,30 @@ def get_gcp_credentials():
         # 1. המרה למילון נקי
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
-        # 2. ניקוי ה-Private Key (קריטי)
+        # 2. "מכונת כביסה" למפתח הפרטי - פותר את שגיאת ה-Padding
         if "private_key" in creds_info:
-            creds_info["private_key"] = creds_info["private_key"].strip().replace("\\n", "\n")
-        
-        # 3. התיקון הקריטי: ייבוא ישיר ושימוש במתודה הסטנדרטית ביותר
+            pk = creds_info["private_key"]
+            
+            # הסרת גרשיים מיותרים אם בטעות הוכנסו (קורה הרבה ב-Secrets)
+            pk = pk.strip().strip('"').strip("'")
+            
+            # תיקון ירידות שורה - מטפל גם ב-\\n וגם ב-\n
+            pk = pk.replace("\\n", "\n")
+            
+            # אם בטעות ה-Header או ה-Footer נדבקו לשורה הראשונה
+            if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk:
+                pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
+                pk = pk.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+            
+            creds_info["private_key"] = pk
+
+        # 3. ייבוא ושימוש במחלקה הנכונה
         from google.oauth2 import service_account
-        
-        # אנחנו מנסים את שתי המתודות האפשריות כדי לוודא שזה יעבוד בכל גרסה
-        if hasattr(service_account.Credentials, 'from_service_account_info'):
-            return service_account.Credentials.from_service_account_info(creds_info)
-        else:
-            return service_account.Credentials.from_info(creds_info)
+        return service_account.Credentials.from_service_account_info(creds_info)
             
     except Exception as e:
-        st.error(f"⚠️ שגיאה טכנית בטעינת ההרשאות: {e}")
+        st.error(f"⚠️ שגיאה טכנית בפורמט המפתח: {e}")
+        st.info("טיפ: וודאי שהמפתח ב-Secrets מתחיל ב-----BEGIN PRIVATE KEY----- ונגמר ב-END... בלי רווחים לפני או אחרי.")
         st.stop()
 
 async def run_branch_pipeline(companies, cities, status_placeholder, progress_bar):
