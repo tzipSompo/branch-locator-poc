@@ -24,19 +24,36 @@ threshold = st.sidebar.slider("רגישות ניקוי (Threshold)", 70, 95, 82)
 
 # --- פונקציית עזר לניהול הרשאות (Cloud vs Local) ---
 def get_gcp_credentials():
-    # בדיקה אם אנחנו בענן (Streamlit Secrets)
-    if "GCP_SERVICE_ACCOUNT" in st.secrets:
+    # 1. בדיקה שהמפתח הראשי קיים
+    if "GCP_SERVICE_ACCOUNT" not in st.secrets:
+        st.error("שגיאה: לא נמצא GCP_SERVICE_ACCOUNT ב-Secrets של Streamlit!")
+        st.stop()
+    
+    # 2. המרה למילון רגיל בצורה בטוחה
+    # ב-Streamlit Cloud עדיף להשתמש ב-items() כדי להבטיח מילון נקי
+    try:
+        creds_info = {k: v for k, v in st.secrets["GCP_SERVICE_ACCOUNT"].items()}
+    except Exception:
+        # אם זה לא עובד, ננסה את השיטה הישנה
         creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
-        # תיקון קטן למחרוזת ה-private key בגלל פורמט TOML
+
+    # 3. בדיקה שכל השדות הקריטיים קיימים
+    required_keys = ["project_id", "private_key", "client_email", "token_uri"]
+    missing_keys = [k for k in required_keys if k not in creds_info]
+    
+    if missing_keys:
+        st.error(f"חסרים שדות ב-Secrets: {', '.join(missing_keys)}")
+        st.stop()
+
+    # 4. הטיפול הקריטי ב-Private Key
+    # לפעמים ה-Key מגיע עם \\n ולפעמים עם \n אמיתי. ה-replace הכפול פותר את זה.
+    if "private_key" in creds_info:
+        # קודם כל מנקים רווחים מיותרים שאולי נכנסו בהעתקה
+        creds_info["private_key"] = creds_info["private_key"].strip()
+        # מחליפים \\n ב-\n אמיתי
         creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-        return service_account.Credentials.from_info(creds_info)
-    
-    # אם אנחנו מקומית - חיפוש הקובץ הקיים
-    key_path = "gcp-key.json"
-    if os.path.exists(key_path):
-        return service_account.Credentials.from_service_account_file(key_path)
-    
-    return None
+
+    return service_account.Credentials.from_info(creds_info)
 
 # --- לוגיקת ההרצה הראשית ---
 async def run_branch_pipeline(companies, cities):
