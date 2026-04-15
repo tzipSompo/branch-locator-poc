@@ -29,27 +29,13 @@ def get_gcp_credentials():
         st.stop()
     
     try:
-        # 1. טעינה למילון
+        # טעינה למילון
         creds_dict = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
         
+        # תיקון קריטי: החלפת מחרוזת ה-n\ בתו ירידת שורה אמיתי
         if "private_key" in creds_dict:
-            pk = str(creds_dict["private_key"])
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
-            # 2. הניקוי ה"אטומי" - הפתרון ל-Byte 61
-            header = "-----BEGIN PRIVATE KEY-----"
-            footer = "-----END PRIVATE KEY-----"
-            
-            if header in pk and footer in pk:
-                # חילוץ גוף המפתח שביניהם
-                content = pk.split(header)[1].split(footer)[0]
-                # מחיקת כל תו שהוא לא אות, מספר, +, / או =
-                # זה מעיף לוכסנים, n\ טקסטואליים ורווחים נסתרים
-                clean_content = re.sub(r'[^A-Za-z0-9+/=]', '', content)
-                # בנייה מחדש בפורמט PEM שהספרייה חייבת לקבל
-                pk = f"{header}\n{clean_content}\n{footer}"
-            
-            creds_dict["private_key"] = pk
-
         return service_account.Credentials.from_service_account_info(creds_dict)
             
     except Exception as e:
