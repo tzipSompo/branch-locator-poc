@@ -1,10 +1,13 @@
 import json
 import asyncio
 import re
+import vertexai
+import os
+import ssl
+import streamlit as st
 from rapidfuzz import fuzz
-from langchain_google_genai import ChatGoogleGenerativeAI 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from vertexai.generative_models import GenerativeModel, GenerationConfig
+from google.oauth2 import service_account
 
 class BranchDeduplicator:
     def __init__(self, extractor, threshold=82):
@@ -12,11 +15,33 @@ class BranchDeduplicator:
         self.threshold = threshold
         
         
-        self.llm = ChatGoogleGenerativeAI(
-            model=extractor.model_id, 
-            temperature=0
-        )
-        self.parser = JsonOutputParser()
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        key_path = os.path.join(os.path.dirname(current_dir), "gcp-key.json")
+        is_local = os.path.exists(key_path)
+
+        if is_local:
+            # --- מצב משרד (חייבים REST ודילוג SSL) ---
+            proxy_url = "http://192.168.174.80:8080"
+            os.environ.update({'HTTP_PROXY': proxy_url, 'HTTPS_PROXY': proxy_url, 'PYTHONHTTPSVERIFY': '0', 'GOOGLE_API_USE_REST': 'true'})
+            ssl._create_default_https_context = ssl._create_unverified_context
+            
+            credentials = service_account.Credentials.from_service_account_file(key_path)
+            project_id = os.getenv("GCP_PROJECT_ID")
+            location = os.getenv("GCP_LOCATION", "us-central1")
+            
+            # כאן החזרתי את ה-api_transport שחיוני לפרוקסי שלך
+            vertexai.init(project=project_id, location=location, credentials=credentials, api_transport="rest")
+        else:
+            # --- מצב ענן ---
+            creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+            credentials = service_account.Credentials.from_info(creds_info)
+            project_id = st.secrets["GCP_PROJECT_ID"]
+            location = st.secrets.get("GCP_LOCATION", "us-central1")
+            vertexai.init(project=project_id, location=location, credentials=credentials)
+
+        self.model_id = "gemini-2.5-flash" 
+        self.llm = GenerativeModel(self.model_id)
 
     def _clean(self, text):
         """ניקוי תווים לפני שליחה ל-LLM למניעת בעיות Matching"""
@@ -25,52 +50,51 @@ class BranchDeduplicator:
         return re.sub(r'[\"\'\-]', '', str(text)).strip() 
     
     async def _get_canonical_map(self, items: list, item_type: str):
-        """Chain 1: נרמול שמות - הופך חברות לאנגלית וערים לעברית תקנית"""
         if not items: return {}
-        
-        # ניקוי הפריטים לפני השליחה כדי שהמפתח (Key) יתאים לטקסט המקורי המנוקה
-        unique_items = list(set(self._clean(i) for i in items if i)) 
-          
-        prompt = ChatPromptTemplate.from_template(
-            "You are a master data cleaner for Israeli retail chains.\n"
-            "Task: Map all variations of {item_type} to one standard version.\n"
-            "Rules:\n"
-            "1. For COMPANIES: Always map to the standard **ENGLISH** name (e.g., 'Aroma', 'Fox Home', 'Super-Pharm').\n"
-            "2. For CITIES: Always map to the standard **ENGLISH** name (e.g., 'תל אביב', 'ירושלים', 'חיפה').\n"
-            "3. Map ALL variations (English, typos, partial names) to these EXACT standards.\n"
-            "4. IMPORTANT: Do not include branch names or addresses in this mapping.\n"
-            "\nList to process: {item_list}\n"
-            "Return ONLY a flat JSON object where the key is the input and the value is the standard name."
+        unique_items = list(set(self._clean(i) for i in items if i))
+    
+        prompt = (
+            f"You are a master data cleaner for Israeli retail chains.\n"
+            f"Task: Map all variations of {item_type} to one standard version.\n"
+            f"Rules:\n"
+            f"1. For COMPANIES: Always map to the standard **ENGLISH** name (e.g., 'Aroma', 'Fox Home', 'Super-Pharm').\n"
+            f"2. For CITIES: Always map to the standard **ENGLISH** name (e.g., 'Tel Aviv', 'Jerusalem', 'Haifa').\n"
+            f"3. Map ALL variations (English, typos, partial names) to these EXACT standards.\n"
+            f"4. Do not include branch names or addresses in this mapping.\n"
+            f"\nList to process: {unique_items}\n"
+            f"Return ONLY a flat JSON object where the key is the input and the value is the standard name."
         )
-        
-        chain = prompt | self.llm | self.parser
-        
+    
         try:
-            return await chain.ainvoke({"item_type": item_type, "item_list": unique_items})
+            response = await asyncio.to_thread(
+                self.llm.generate_content,
+                prompt,
+                generation_config=GenerationConfig(response_mime_type="application/json")
+            )
+            return json.loads(response.text)
         except Exception as e:
             print(f"⚠️ Normalization failed: {e}")
             return {}
 
     async def _judge_pair(self, b1, b2):
-        """Chain 2: שופט AI למקרים גבוליים"""
-        prompt = ChatPromptTemplate.from_template(
+        prompt = (
             "Decide if these two are the EXACT same physical store branch.\n"
-            "Rules:\n"
-            "1. If one address contains the other (e.g., 'Weizman 14' and 'Weizman 14, Mall'), they are the SAME.\n"
-            "2. Hebrew and English versions of the same street are the SAME (e.g. 'Kanfei Nesharim' and 'כנפי נשרים').\n"
-            "3. Ignore 'Paz', 'Gas station', 'Mall', 'קניון' - focus only on street name and number.\n"
-            "\nBranch A: {n1} at {a1}, {c1}\n"
-            "Branch B: {n2} at {a2}, {c2}\n"
-            "Respond ONLY with JSON: "
-            "{{\"is_same\": true/false, \"merged_address\": \"Standard Hebrew Address\", \"merged_name\": \"Clean Branch Name\"}}"
+            f"Rules:\n"
+            f"1. If one address contains the other (e.g., 'Weizman 14' and 'Weizman 14, Mall'), they are the SAME.\n"
+            f"2. Hebrew and English versions of the same street are the SAME.\n"
+            f"3. Ignore 'Paz', 'Gas station', 'Mall' - focus only on street name and number.\n"
+            f"\nBranch A: {b1.branch_name} at {b1.address}, {b1.city}\n"
+            f"Branch B: {b2.branch_name} at {b2.address}, {b2.city}\n"
+            f'Respond ONLY with JSON: {{"is_same": true/false, "merged_address": "Standard Hebrew Address", "merged_name": "Clean Branch Name"}}'
         )
-
-        chain = prompt | self.llm | self.parser
+    
         try:
-            return await chain.ainvoke({
-                "n1": b1.branch_name, "a1": b1.address, "c1": b1.city,
-                "n2": b2.branch_name, "a2": b2.address, "c2": b2.city
-            })
+            response = await asyncio.to_thread(
+                self.llm.generate_content,
+                prompt,
+                generation_config=GenerationConfig(response_mime_type="application/json")
+            )
+            return json.loads(response.text)
         except:
             return {"is_same": False}
 
