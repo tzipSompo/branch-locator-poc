@@ -48,7 +48,7 @@ class BranchExtractor:
             # --- מצב ענן ---
             creds_info = dict(st.secrets["GCP_SERVICE_ACCOUNT"])
             creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-            credentials = service_account.Credentials.from_info(creds_info)
+            credentials = service_account.Credentials.from_service_account_info(creds_info)
             project_id = st.secrets["GCP_PROJECT_ID"]
             location = st.secrets.get("GCP_LOCATION", "us-central1")
             vertexai.init(project=project_id, location=location, credentials=credentials)
